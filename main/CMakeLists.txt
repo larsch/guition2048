@@ -1,2 +1,2 @@
-idf_component_register(SRCS "esp32s3_4848s040_bootstrap.c"
+idf_component_register(SRCS "display.c" "touch.c" "demo.c" "main.c"
                     INCLUDE_DIRS ".")
