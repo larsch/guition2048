@@ -137,7 +137,13 @@ static uint16_t               *s_clean_bg;       /* pristine background */
  static touch_state_t   s_touch_prev;
  static touch_state_t   s_touch_held;
  static uint8_t         s_touch_hold;
- static uint16_t       *s_scratch;        /* small buffer for partial updates */
+ static uint16_t       *s_scratch;
+ #if CONFIG_LCD_ANIMATION
+  #define ANIM_FRAMES 12
+  static uint16_t      *s_anim_frames[ANIM_FRAMES];
+  static uint8_t        s_anim_phase;
+  static uint8_t        s_anim_hold;
+ #endif
 #endif
 
 /* ================================================================
@@ -204,9 +210,8 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
 
 static const uint8_t s_wave[12] = {0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1};
 
-static inline uint16_t bg_pixel(int x, int y)
+static inline uint16_t anim_pixel(int x, int y, int phase)
 {
-    int phase = 0;  /* one static frame from the wave pattern */
     int wa  = s_wave[phase % 12];
     int wb  = s_wave[(phase + 4) % 12];
     int dx  = (x > y) ? (x - y) : (y - x);
@@ -230,6 +235,28 @@ static inline uint16_t bg_pixel(int x, int y)
         return (x < 240) ? (cell ? rgb565(96, 160, 255) : rgb565(24, 48, 120))
                          : (cell ? rgb565(255, 224, 96) : rgb565(120, 96, 24));
 }
+
+static inline uint16_t bg_pixel(int x, int y) { return anim_pixel(x, y, 0); }
+
+#if CONFIG_LCD_ANIMATION
+static void prepare_animation_frames(void)
+{
+    ESP_LOGI(TAG, "Pre-computing %d animation frames (%.0f KB PSRAM) ...",
+             ANIM_FRAMES, (float)(ANIM_FRAMES * LCD_FRAME_SIZE) / 1024.0f);
+    for (int p = 0; p < ANIM_FRAMES; p++) {
+        s_anim_frames[p] = heap_caps_aligned_alloc(64, LCD_FRAME_SIZE,
+                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ESP_ERROR_CHECK(s_anim_frames[p] ? ESP_OK : ESP_ERR_NO_MEM);
+        for (int y = 0; y < LCD_V_RES; y++) {
+            uint16_t *row = s_anim_frames[p] + (y * LCD_H_RES);
+            for (int x = 0; x < LCD_H_RES; x++) {
+                row[x] = anim_pixel(x, y, p);
+            }
+        }
+    }
+    ESP_LOGI(TAG, "Animation frames ready");
+}
+#endif
 
 static void prepare_background(void)
 {
@@ -508,6 +535,8 @@ static IRAM_ATTR bool on_bounce_empty(esp_lcd_panel_handle_t panel,
 
 #if !LCD_BUF_IS_ISR_DRIVEN
 
+#if !CONFIG_LCD_ANIMATION
+
 static void restore_rect(int x0, int y0, int x1, int y1)
 {
     if (x0 < 0) x0 = 0;
@@ -572,6 +601,8 @@ static void draw_touch_rect(int tx, int ty, uint16_t color)
     esp_lcd_panel_draw_bitmap(s_panel, bx0, by0, bx0 + w, by0 + h, s_scratch);
 }
 
+#endif /* !CONFIG_LCD_ANIMATION */
+
 static void render_task(void *arg)
 {
     (void)arg;
@@ -584,7 +615,7 @@ static void render_task(void *arg)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(16));
 
-        /* debounce: hold last valid touch for a few frames */
+        /* debounce touch state */
         if (s_touch.points > 0) {
             s_touch_hold = 3;
             s_touch_held.points = s_touch.points;
@@ -595,7 +626,6 @@ static void render_task(void *arg)
         } else if (s_touch_hold > 0) {
             s_touch_hold--;
         }
-        /* use debounced state for diff */
         touch_state_t cur;
         cur.points = (s_touch_hold > 0) ? s_touch_held.points : 0;
         for (uint8_t i = 0; i < GT911_MAX_CONTACTS; i++) {
@@ -603,6 +633,33 @@ static void render_task(void *arg)
             cur.y[i] = s_touch_held.y[i];
         }
 
+#if CONFIG_LCD_ANIMATION
+        /* --- animated mode: bake touch into keyframe, push once --- */
+        s_anim_hold++;
+        if (s_anim_hold >= 2) {
+            s_anim_hold = 0;
+            s_anim_phase = (s_anim_phase + 1) % ANIM_FRAMES;
+            memcpy(s_clean_bg, s_anim_frames[s_anim_phase], LCD_FRAME_SIZE);
+            for (uint8_t p = 0; p < cur.points; p++) {
+                int bx0 = (int)cur.x[p] - TOUCH_BOX_HALF;
+                int bx1 = (int)cur.x[p] + TOUCH_BOX_HALF;
+                int by0 = (int)cur.y[p] - TOUCH_BOX_HALF;
+                int by1 = (int)cur.y[p] + TOUCH_BOX_HALF;
+                if (bx0 < 0) bx0 = 0;
+                if (bx1 >= LCD_H_RES) bx1 = LCD_H_RES - 1;
+                if (by0 < 0) by0 = 0;
+                if (by1 >= LCD_V_RES) by1 = LCD_V_RES - 1;
+                uint16_t c = s_touch_colors[p % GT911_MAX_CONTACTS];
+                for (int y = by0; y <= by1; y++) {
+                    uint16_t *row = s_clean_bg + (y * LCD_H_RES);
+                    for (int x = bx0; x <= bx1; x++) row[x] = c;
+                }
+            }
+            esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_H_RES, LCD_V_RES,
+                                      s_clean_bg);
+        }
+#else
+        /* --- static mode: partial touch updates --- */
         uint8_t max_pts = cur.points;
         if (s_touch_prev.points > max_pts) max_pts = s_touch_prev.points;
 
@@ -614,24 +671,21 @@ static void render_task(void *arg)
                           s_touch_prev.y[i] != cur.y[i]);
 
             if (was && !is) {
-                /* touch removed — restore background */
                 restore_rect((int)s_touch_prev.x[i] - TOUCH_BOX_HALF,
                              (int)s_touch_prev.y[i] - TOUCH_BOX_HALF,
                              (int)s_touch_prev.x[i] + TOUCH_BOX_HALF,
                              (int)s_touch_prev.y[i] + TOUCH_BOX_HALF);
             } else if (was && is && moved) {
-                /* touch moved — atomic restore+draw in one transfer */
                 uint16_t c = s_touch_colors[i % GT911_MAX_CONTACTS];
                 move_touch_rect((int)s_touch_prev.x[i],
                                 (int)s_touch_prev.y[i],
                                 (int)cur.x[i], (int)cur.y[i], c);
             } else if (!was && is) {
-                /* touch added — draw */
                 uint16_t c = s_touch_colors[i % GT911_MAX_CONTACTS];
                 draw_touch_rect((int)cur.x[i], (int)cur.y[i], c);
             }
-            /* else: stationary touch — no update needed */
         }
+#endif
 
         s_touch_prev = cur;
     }
@@ -717,6 +771,9 @@ void app_main(void)
 
     backlight_init();
     prepare_background();
+#if CONFIG_LCD_ANIMATION
+    prepare_animation_frames();
+#endif
     s_panel = create_panel();
 
 #if !LCD_BUF_IS_ISR_DRIVEN

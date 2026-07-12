@@ -1,7 +1,7 @@
 menu "LCD Buffer Configuration"
     choice LCD_BUF_MODE
         prompt "RGB LCD Buffer Mode"
-        default LCD_BUF_MODE_BOUNCE_PSRAM_FB
+        default LCD_BUF_MODE_PSRAM_FB
         help
             Select the frame buffer strategy used by the RGB LCD driver.
             Mode 1 (internal SRAM) is not available — 460 KB doesn't fit.
@@ -18,4 +18,13 @@ menu "LCD Buffer Configuration"
         config LCD_BUF_MODE_BOUNCE_ONLY
             bool "6 - Bounce buffer only (no framebuffer)"
     endchoice
+
+    config LCD_ANIMATION
+        bool "Enable animated background (modes 2–5)"
+        default n
+        help
+            Pre-computes 6 animation keyframes (~2.7 MB PSRAM) and cycles
+            through them at ~15 fps. Each frame change requires a full-frame
+            DMA transfer (~35 ms), which may delay touch updates briefly.
+            Mode 6 is unaffected (uses on-the-fly ISR rendering).
 endmenu
