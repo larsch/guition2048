@@ -1,0 +1,22 @@
+menu "LCD Buffer Configuration"
+    choice LCD_BUF_MODE
+        prompt "RGB LCD Buffer Mode"
+        default LCD_BUF_MODE_BOUNCE_PSRAM_FB
+        help
+            Select the frame buffer strategy used by the RGB LCD driver.
+            See: https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/rgb_lcd.html
+
+        config LCD_BUF_MODE_INTERNAL_FB
+            bool "1 - Single FB in internal memory"
+        config LCD_BUF_MODE_PSRAM_FB
+            bool "2 - Single FB in PSRAM"
+        config LCD_BUF_MODE_DOUBLE_PSRAM_FB
+            bool "3 - Double FB in PSRAM"
+        config LCD_BUF_MODE_USER_FB
+            bool "4 - User custom FB"
+        config LCD_BUF_MODE_BOUNCE_PSRAM_FB
+            bool "5 - Bounce buffer + PSRAM FB"
+        config LCD_BUF_MODE_BOUNCE_ONLY
+            bool "6 - Bounce buffer only (no framebuffer)"
+    endchoice
+endmenu
