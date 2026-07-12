@@ -4,10 +4,9 @@ menu "LCD Buffer Configuration"
         default LCD_BUF_MODE_BOUNCE_PSRAM_FB
         help
             Select the frame buffer strategy used by the RGB LCD driver.
+            Mode 1 (internal SRAM) is not available — 460 KB doesn't fit.
             See: https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/rgb_lcd.html
 
-        config LCD_BUF_MODE_INTERNAL_FB
-            bool "1 - Single FB in internal memory"
         config LCD_BUF_MODE_PSRAM_FB
             bool "2 - Single FB in PSRAM"
         config LCD_BUF_MODE_DOUBLE_PSRAM_FB

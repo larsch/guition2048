@@ -83,7 +83,7 @@
  * ================================================================ */
 
 #if CONFIG_LCD_BUF_MODE_INTERNAL_FB
- #define LCD_BUF_MODE  1
+ #error "Mode 1 (Internal FB) requires ~460 KB SRAM — not available on ESP32-S3. Use mode 2 or higher."
 #elif CONFIG_LCD_BUF_MODE_PSRAM_FB
  #define LCD_BUF_MODE  2
 #elif CONFIG_LCD_BUF_MODE_DOUBLE_PSRAM_FB
@@ -399,9 +399,7 @@ static esp_lcd_rgb_panel_config_t make_rgb_config(void)
         },
     };
 
-#if LCD_BUF_MODE == 1
-    cfg.num_fbs = 1;
-#elif LCD_BUF_MODE == 2
+#if LCD_BUF_MODE == 2
     cfg.num_fbs = 1;
     cfg.flags.fb_in_psram = 1;
 #elif LCD_BUF_MODE == 3
@@ -409,6 +407,7 @@ static esp_lcd_rgb_panel_config_t make_rgb_config(void)
     cfg.flags.fb_in_psram = 1;
 #elif LCD_BUF_MODE == 4
     cfg.num_fbs = 1;
+    cfg.flags.fb_in_psram = 1;  /* user buffer allocated in PSRAM */
 #elif LCD_BUF_MODE == 5
     cfg.num_fbs = 1;
     cfg.bounce_buffer_size_px = LCD_BOUNCE_PX;
