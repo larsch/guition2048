@@ -224,12 +224,24 @@ static void reset_game(void)
 
 static void fill_rect(int x, int y, int w, int h, uint16_t color)
 {
-    for (int row = y; row < y + h; row++) {
-        if (row < 0 || row >= LCD_V_RES) continue;
-        for (int col = x; col < x + w; col++) {
-            if (col >= 0 && col < LCD_H_RES)
-                s_fb[row * LCD_H_RES + col] = color;
-        }
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > LCD_H_RES) w = LCD_H_RES - x;
+    if (y + h > LCD_V_RES) h = LCD_V_RES - y;
+    if (w <= 0 || h <= 0) return;
+
+    uint32_t color32 = ((uint32_t)color << 16) | color;
+    for (int row = 0; row < h; row++) {
+        uint16_t *line = &s_fb[(y + row) * LCD_H_RES + x];
+        int col = 0;
+        /* aligned 32-bit writes for speed */
+        if (((uintptr_t)line & 3) && w > 0) { *line++ = color; col++; }
+        uint32_t *line32 = (uint32_t *)line;
+        int w32 = (w - col) / 2;
+        for (int i = 0; i < w32; i++) line32[i] = color32;
+        col += w32 * 2;
+        line = (uint16_t *)(line32 + w32);
+        for (; col < w; col++) *line++ = color;
     }
 }
 
@@ -404,6 +416,7 @@ static void game_task(void *arg)
     ESP_ERROR_CHECK(s_fb ? ESP_OK : ESP_ERR_NO_MEM);
 
     reset_game();
+    bool dirty = true;
 
     while (1) {
         dir_t dir;
@@ -411,6 +424,7 @@ static void game_task(void *arg)
             if (move_dir(dir)) {
                 spawn_tile();
                 if (!can_move()) s_game_over = true;
+                dirty = true;
             }
             if (s_score > s_best) s_best = s_score;
         }
@@ -420,11 +434,15 @@ static void game_task(void *arg)
             const touch_state_t *ts = touch_get_state();
             if (ts->points > 0) {
                 reset_game();
-                vTaskDelay(pdMS_TO_TICKS(300)); // debounce
+                dirty = true;
+                vTaskDelay(pdMS_TO_TICKS(300));
             }
         }
 
-        render();
+        if (dirty) {
+            render();
+            dirty = false;
+        }
         vTaskDelay(pdMS_TO_TICKS(30));
     }
 }
