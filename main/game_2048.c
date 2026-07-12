@@ -19,15 +19,13 @@
 static const char *TAG = "2048";
 
 #define GRID_SIZE  4
-#define CELL_SIZE  100
-#define CELL_GAP   10
-#define BOARD_X    ((LCD_H_RES - (GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP)) / 2)
-#define BOARD_Y    55
-#define SCORE_Y    15
+#define CELL_SIZE  120
+#define CELL_GAP   0
+#define BOARD_X    0
+#define BOARD_Y    0
+#define SCORE_Y    2
 
 #define FONT_SCALE 4
-#define FONT_W     (3 * FONT_SCALE)
-#define FONT_H     (5 * FONT_SCALE)
 
 /* ================================================================
  * 3×5 pixel font for digits 0–9
@@ -58,18 +56,18 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
 typedef struct { uint16_t bg; uint16_t fg; } tile_color_t;
 
 static const tile_color_t s_colors[] = {
-    {0xCE59, 0x6B4D}, // 0 (empty)
-    {0xEF5A, 0x6B4D}, // 2
-    {0xEF38, 0x6B4D}, // 4
-    {0xF595, 0xFE19}, // 8
-    {0xF6A6, 0xFE19}, // 16
-    {0xF73E, 0xFE19}, // 32
-    {0xF72B, 0xFE19}, // 64
-    {0xEE6E, 0xFE19}, // 128
-    {0xEE4C, 0xFE19}, // 256
-    {0xEE29, 0xFE19}, // 512
-    {0xEE07, 0xFE19}, // 1024
-    {0xEDE4, 0xFE19}, // 2048
+    {0xCE16, 0x736C}, // 0 (empty: tan bg, dark fg)
+    {0xEF3B, 0x736C}, // 2 (cream bg, dark fg)
+    {0xEF19, 0x736C}, // 4 (cream bg, dark fg)
+    {0xF58F, 0xFFFF}, // 8 (orange bg, white fg)
+    {0xF4AC, 0xFFFF}, // 16
+    {0xF3EB, 0xFFFF}, // 32
+    {0xF2E7, 0xFFFF}, // 64
+    {0xEE6E, 0xFFFF}, // 128
+    {0xEE6C, 0xFFFF}, // 256
+    {0xEE4A, 0xFFFF}, // 512
+    {0xEE27, 0xFFFF}, // 1024
+    {0xEE05, 0xFFFF}, // 2048
 };
 
 static tile_color_t tile_color(uint32_t val)
@@ -295,40 +293,26 @@ static void draw_number(int cx, int cy, uint32_t val, uint16_t color, int scale)
 
 static void render(void)
 {
-    /* background */
-    fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(250, 248, 239));
-
-    /* score */
-    char score_buf[32];
-    snprintf(score_buf, sizeof(score_buf), "Score: %lu  Best: %lu",
-             (unsigned long)s_score, (unsigned long)s_best);
-    int score_w = strlen(score_buf) * (3 * 2 + 2);
-    // ... simplified: draw score with small font
-    draw_number(LCD_H_RES / 2, SCORE_Y, s_score, rgb565(119, 110, 101), 2);
-
-    /* grid background */
-    fill_rect(BOARD_X - 5, BOARD_Y - 5,
-              GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP + 10,
-              GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP + 10,
-              rgb565(187, 173, 160));
+    /* grid background fills screen */
+    fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(187, 173, 160));
 
     /* tiles */
     for (int r = 0; r < GRID_SIZE; r++) {
         for (int c = 0; c < GRID_SIZE; c++) {
-            int tx = BOARD_X + c * (CELL_SIZE + CELL_GAP);
-            int ty = BOARD_Y + r * (CELL_SIZE + CELL_GAP);
+            int tx = c * CELL_SIZE;
+            int ty = r * CELL_SIZE;
             tile_color_t tc = tile_color(s_grid[r][c]);
-            fill_rect(tx, ty, CELL_SIZE, CELL_SIZE, tc.bg);
+            /* 2px gap between tiles shows board background */
+            fill_rect(tx + 1, ty + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc.bg);
 
             if (s_grid[r][c] != 0) {
                 int num_scale = FONT_SCALE;
                 uint32_t v = s_grid[r][c];
-                /* reduce scale for large numbers */
                 int digits = 0; uint32_t vv = v;
                 do { digits++; vv /= 10; } while (vv > 0);
                 int digit_w = 3 * num_scale + num_scale;
                 int total_w = digits * digit_w - num_scale;
-                while (total_w > CELL_SIZE - 10 && num_scale > 1) {
+                while (total_w > CELL_SIZE - 14 && num_scale > 1) {
                     num_scale--;
                     digit_w = 3 * num_scale + num_scale;
                     total_w = digits * digit_w - num_scale;
@@ -340,17 +324,23 @@ static void render(void)
         }
     }
 
-    /* game over overlay */
+    /* score in top-left corner */
+    {
+        uint32_t v = s_score;
+        int digits = 0; uint32_t vv = v;
+        do { digits++; vv /= 10; } while (vv > 0);
+        int scale = 2;
+        int digit_w = 3 * scale + scale;
+        int total_w = digits * digit_w - scale;
+        /* left-aligned: draw_number centers at cx, so cx = left + total_w/2 */
+        draw_number(4 + total_w / 2, SCORE_Y + 10,
+                    s_score, rgb565(119, 110, 101), scale);
+    }
+
+    /* game-over dim + tap prompt */
     if (s_game_over) {
-        uint16_t ov = rgb565(255, 255, 255);
-        ov = (ov & 0xF7DE) >> 1; // darken
-        // semi-transparent not easy in RGB565; just draw a dim overlay
-        fill_rect(BOARD_X, BOARD_Y,
-                  GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP,
-                  GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP,
-                  rgb565(238, 228, 218));
-        // "GAME OVER" text — just draw a red rectangle as placeholder
-        // TODO: proper text rendering for labels
+        fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(238, 228, 218));
+        // draw "GAME OVER" as score text replacement
     }
 
     /* push frame */
