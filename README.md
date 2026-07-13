@@ -1,33 +1,33 @@
-# Guition ESP32-S3-4848S040 bootstrap
+# 2048 for Guition ESP32-S3-4848S040
 
-Commands used:
+A playable 2048 tile-matching game for the Guition ESP32-S3-4848S040
+development board (480×480 RGB LCD with ST7701 controller + GT911 touch).
+
+## Gameplay
+
+- Swipe to move tiles. Equal tiles merge.
+- Reach 2048 to win, keep playing for higher scores.
+- Game over when no moves remain — tap to restart.
+
+## Build & flash
 
 ```bash
 . /opt/esp-idf/export.sh
 export PORT=/dev/ttyUSB0
 
-idf.py create-project esp32s3_4848s040_bootstrap
-idf.py set-target esp32s3
-idf.py add-dependency "espressif/esp_lcd_st7701"
-idf.py add-dependency "espressif/esp_lcd_panel_io_additions"
-idf.py add-dependency "espressif/esp_lcd_touch_gt911"
-
 idf.py build
 idf.py -p $PORT flash monitor
-
-idf.py save-defconfig
-
-python -m esptool --port $PORT chip_id
-python -m esptool --port $PORT erase_flash
 ```
 
-Notes:
+## Project structure
 
-```bash
-# Standard milestone loop
-idf.py build && idf.py -p $PORT flash monitor
+| File | Purpose |
+|------|---------|
+| `main/board.h` | Pin definitions, display constants |
+| `main/display.h/c` | ST7701 panel init, backlight |
+| `main/touch.h/c` | GT911 touch via I²C |
+| `main/game_2048.h/c` | Game logic, rendering, animation |
+| `main/main.c` | Entry point (~10 lines) |
 
-# Recovery erase before reflashing
-python -m esptool --port $PORT erase_flash
-idf.py -p $PORT flash monitor
-```
+Replace `game_2048.c` and modify `main.c` to build your own app —
+the board support files are reusable as-is.
