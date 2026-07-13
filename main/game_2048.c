@@ -92,7 +92,8 @@ static uint32_t  s_score;
 static uint32_t  s_best;
 static bool      s_game_over;
 static bool      s_won;
-static uint16_t *s_fb;
+static uint16_t *s_fb[2];
+static int       s_fb_idx;
 
 /* ================================================================
  * Logic
@@ -230,7 +231,7 @@ static void fill_rect(int x, int y, int w, int h, uint16_t color)
 
     uint32_t color32 = ((uint32_t)color << 16) | color;
     for (int row = 0; row < h; row++) {
-        uint16_t *line = &s_fb[(y + row) * LCD_H_RES + x];
+        uint16_t *line = &s_fb[s_fb_idx][(y + row) * LCD_H_RES + x];
         int col = 0;
         /* aligned 32-bit writes for speed */
         if (((uintptr_t)line & 3) && w > 0) { *line++ = color; col++; }
@@ -260,7 +261,7 @@ static void draw_char(int cx, int cy, char ch, uint16_t color, int scale)
                     if ((y + sy) < 0 || (y + sy) >= LCD_V_RES) continue;
                     for (int sx = 0; sx < scale; sx++) {
                         if ((x + sx) >= 0 && (x + sx) < LCD_H_RES)
-                            s_fb[(y + sy) * LCD_H_RES + x + sx] = color;
+                            s_fb[s_fb_idx][(y + sy) * LCD_H_RES + x + sx] = color;
                     }
                 }
             }
@@ -345,7 +346,8 @@ static void render(void)
 
     /* push full frame */
     esp_lcd_panel_draw_bitmap(display_get_panel(), 0, 0,
-                              LCD_H_RES, LCD_V_RES, s_fb);
+                              LCD_H_RES, LCD_V_RES, s_fb[s_fb_idx]);
+    s_fb_idx ^= 1;
 }
 
 /* ================================================================
@@ -401,9 +403,12 @@ static void game_task(void *arg)
 {
     (void)arg;
 
-    s_fb = heap_caps_aligned_alloc(64, LCD_FRAME_SIZE,
+    s_fb[0] = heap_caps_aligned_alloc(64, LCD_FRAME_SIZE,
                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    ESP_ERROR_CHECK(s_fb ? ESP_OK : ESP_ERR_NO_MEM);
+    s_fb[1] = heap_caps_aligned_alloc(64, LCD_FRAME_SIZE,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(s_fb[0] && s_fb[1] ? ESP_OK : ESP_ERR_NO_MEM);
+    s_fb_idx = 0;
 
     reset_game();
     bool dirty = true;
