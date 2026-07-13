@@ -97,7 +97,8 @@ static int       s_fb_idx;
 
 /* animation state */
 static uint32_t s_grid_prev[GRID_SIZE][GRID_SIZE];
-static int      s_anim_src[GRID_SIZE][GRID_SIZE];  /* source row or col per tile */
+static int      s_anim_src[GRID_SIZE][GRID_SIZE];   /* primary source row/col */
+static int      s_anim_src2[GRID_SIZE][GRID_SIZE];  /* second source (merge) or -1 */
 #define ANIM_FRAMES 8
 
 /* ================================================================
@@ -206,7 +207,7 @@ static void compute_anims(dir_t dir)
     /* reset */
     for (int r = 0; r < GRID_SIZE; r++)
         for (int c = 0; c < GRID_SIZE; c++)
-            s_anim_src[r][c] = -1;
+            s_anim_src[r][c] = s_anim_src2[r][c] = -1;
 
     for (int line = 0; line < GRID_SIZE; line++) {
         /* collect non-zero tiles with their positions along the axis */
@@ -226,14 +227,17 @@ static void compute_anims(dir_t dir)
         }
 
         /* simulate merge to get result positions */
-        int res_idx[GRID_SIZE];
+        int res_idx[GRID_SIZE], res_idx2[GRID_SIZE];
         int rcnt = 0;
         for (int i = 0; i < cnt; i++) {
             if (i + 1 < cnt && vals[i] == vals[i+1]) {
-                res_idx[rcnt++] = idxs[i];  /* first source index */
-                i++;
+                res_idx[rcnt] = idxs[i];
+                res_idx2[rcnt] = idxs[i+1];
+                rcnt++; i++;
             } else {
-                res_idx[rcnt++] = idxs[i];
+                res_idx[rcnt] = idxs[i];
+                res_idx2[rcnt] = -1;
+                rcnt++;
             }
         }
 
@@ -243,6 +247,7 @@ static void compute_anims(dir_t dir)
             int r = (dir == DIR_UP || dir == DIR_DOWN) ? d : line;
             int c = (dir == DIR_UP || dir == DIR_DOWN) ? line : d;
             s_anim_src[r][c] = res_idx[dst];
+            s_anim_src2[r][c] = res_idx2[dst];
         }
     }
 }
@@ -380,6 +385,31 @@ static void render_anim(dir_t dir, int step, int total)
             draw_number(cur_x + CELL_SIZE / 2,
                         cur_y + (CELL_SIZE - 5 * num_scale) / 2,
                         v, tc.fg, num_scale);
+
+            /* second source tile sliding in for a merge */
+            int src2 = s_anim_src2[r][c];
+            if (src2 >= 0) {
+                int from2_x = horiz ? src2 * CELL_SIZE : c * CELL_SIZE;
+                int from2_y = horiz ? r * CELL_SIZE : src2 * CELL_SIZE;
+                int cur2_x  = from2_x + (to_x - from2_x) * step / total;
+                int cur2_y  = from2_y + (to_y - from2_y) * step / total;
+                tile_color_t tc2 = tile_color(s_grid_prev[horiz ? r : src2][horiz ? src2 : c]);
+                fill_rect(cur2_x + 1, cur2_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc2.bg);
+                int num_scale2 = FONT_SCALE;
+                uint32_t v2 = s_grid_prev[horiz ? r : src2][horiz ? src2 : c];
+                int digits2 = 0; uint32_t vv2 = v2;
+                do { digits2++; vv2 /= 10; } while (vv2 > 0);
+                int digit_w2 = 3 * num_scale2 + num_scale2;
+                int total_w2 = digits2 * digit_w2 - num_scale2;
+                while (total_w2 > CELL_SIZE - 14 && num_scale2 > 1) {
+                    num_scale2--;
+                    digit_w2 = 3 * num_scale2 + num_scale2;
+                    total_w2 = digits2 * digit_w2 - num_scale2;
+                }
+                draw_number(cur2_x + CELL_SIZE / 2,
+                            cur2_y + (CELL_SIZE - 5 * num_scale2) / 2,
+                            v2, tc2.fg, num_scale2);
+            }
         }
     }
 
