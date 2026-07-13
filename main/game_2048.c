@@ -21,9 +21,6 @@ static const char *TAG = "2048";
 
 #define GRID_SIZE  4
 #define CELL_SIZE  120
-#define CELL_GAP   0
-#define BOARD_X    0
-#define BOARD_Y    0
 #define SCORE_Y    2
 
 #define FONT_SCALE 4
@@ -74,9 +71,7 @@ static const tile_color_t s_colors[] = {
 static tile_color_t tile_color(uint32_t val)
 {
     if (val == 0) return s_colors[0];
-    int idx = 0;
-    uint32_t v = val;
-    while (v > 1) { idx++; v >>= 1; }
+    int idx = 31 - __builtin_clz(val);
     if (idx >= (int)(sizeof(s_colors) / sizeof(s_colors[0])))
         idx = sizeof(s_colors) / sizeof(s_colors[0]) - 1;
     return s_colors[idx];
@@ -92,7 +87,6 @@ static uint32_t  s_grid[GRID_SIZE][GRID_SIZE];
 static uint32_t  s_score;
 static uint32_t  s_best;
 static bool      s_game_over;
-static bool      s_won;
 static uint16_t *s_fb[2];
 static int       s_fb_idx;
 
@@ -200,7 +194,6 @@ static bool slide_row(uint32_t *row)
         if (tmp[i] == tmp[i+1]) {
             tmp[i] *= 2;
             s_score += tmp[i];
-            if (tmp[i] == 2048) s_won = true;
             tmp[i+1] = 0;
             moved = true;
         }
@@ -249,8 +242,6 @@ static bool move_dir(dir_t dir)
 
     for (int r = 0; r < GRID_SIZE; r++) {
         if (dir == DIR_RIGHT || dir == DIR_DOWN) reverse_row(s_grid[r]);
-        uint32_t save[GRID_SIZE];
-        memcpy(save, s_grid[r], sizeof(save));
         if (slide_row(s_grid[r])) moved = true;
         if (dir == DIR_RIGHT || dir == DIR_DOWN) reverse_row(s_grid[r]);
     }
@@ -328,7 +319,6 @@ static void reset_game(void)
     memset(s_grid, 0, sizeof(s_grid));
     s_score = 0;
     s_game_over = false;
-    s_won = false;
     spawn_tile();
     spawn_tile();
 }
@@ -364,8 +354,6 @@ static void draw_char(int cx, int cy, char ch, uint16_t color, int scale)
 {
     if (ch < '0' || ch > '9') return;
     const uint8_t *glyph = s_font[ch - '0'];
-    int pw = 3 * scale;
-    int ph = 5 * scale;
 
     for (int row = 0; row < 5; row++) {
         uint8_t bits = glyph[row];
@@ -373,16 +361,33 @@ static void draw_char(int cx, int cy, char ch, uint16_t color, int scale)
             if (bits & (1 << (2 - col))) {
                 int x = cx + col * scale;
                 int y = cy + row * scale;
-                for (int sy = 0; sy < scale; sy++) {
-                    if ((y + sy) < 0 || (y + sy) >= LCD_V_RES) continue;
-                    for (int sx = 0; sx < scale; sx++) {
-                        if ((x + sx) >= 0 && (x + sx) < LCD_H_RES)
-                            s_fb[s_fb_idx][(y + sy) * LCD_H_RES + x + sx] = color;
-                    }
-                }
+                for (int sy = 0; sy < scale; sy++)
+                    for (int sx = 0; sx < scale; sx++)
+                        s_fb[s_fb_idx][(y + sy) * LCD_H_RES + x + sx] = color;
             }
         }
     }
+}
+
+static void draw_tile_number(int cx, int cy, uint32_t val, uint16_t color, int max_scale)
+{
+    if (val == 0) return;
+    char buf[16];
+    int len = 0;
+    uint32_t v = val;
+    do { buf[len++] = '0' + (v % 10); v /= 10; } while (v > 0);
+    for (int i = 0; i < len / 2; i++) {
+        char t = buf[i]; buf[i] = buf[len-1-i]; buf[len-1-i] = t;
+    }
+    int scale = max_scale;
+    int digit_w = 3 * scale + scale;
+    int total_w = len * digit_w - scale;
+    while (total_w > CELL_SIZE - 14 && scale > 1) {
+        scale--; digit_w = 3 * scale + scale; total_w = len * digit_w - scale;
+    }
+    int start_x = cx - total_w / 2;
+    for (int i = 0; i < len; i++)
+        draw_char(start_x + i * digit_w, cy, buf[i], color, scale);
 }
 
 static void draw_number(int cx, int cy, uint32_t val, uint16_t color, int scale)
@@ -442,20 +447,9 @@ static void render_anim(dir_t dir, int step, int total)
                 : s_grid[r][c];
             tile_color_t tc = tile_color(v);
             fill_rect(cur_x + 1, cur_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc.bg);
-
-            int num_scale = FONT_SCALE;
-            int digits = 0; uint32_t vv = v;
-            do { digits++; vv /= 10; } while (vv > 0);
-            int digit_w = 3 * num_scale + num_scale;
-            int total_w = digits * digit_w - num_scale;
-            while (total_w > CELL_SIZE - 14 && num_scale > 1) {
-                num_scale--;
-                digit_w = 3 * num_scale + num_scale;
-                total_w = digits * digit_w - num_scale;
-            }
-            draw_number(cur_x + CELL_SIZE / 2,
-                        cur_y + (CELL_SIZE - 5 * num_scale) / 2,
-                        v, tc.fg, num_scale);
+            draw_tile_number(cur_x + CELL_SIZE / 2,
+                        cur_y + (CELL_SIZE - 5 * FONT_SCALE) / 2,
+                        v, tc.fg, FONT_SCALE);
 
             /* second source tile sliding in for a merge */
             if (src2 >= 0) {
@@ -463,22 +457,12 @@ static void render_anim(dir_t dir, int step, int total)
                 int from2_y = horiz ? r * CELL_SIZE : src2 * CELL_SIZE;
                 int cur2_x  = from2_x + (to_x - from2_x) * step / total;
                 int cur2_y  = from2_y + (to_y - from2_y) * step / total;
-                tile_color_t tc2 = tile_color(s_grid_prev[horiz ? r : src2][horiz ? src2 : c]);
-                fill_rect(cur2_x + 1, cur2_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc2.bg);
-                int num_scale2 = FONT_SCALE;
                 uint32_t v2 = s_grid_prev[horiz ? r : src2][horiz ? src2 : c];
-                int digits2 = 0; uint32_t vv2 = v2;
-                do { digits2++; vv2 /= 10; } while (vv2 > 0);
-                int digit_w2 = 3 * num_scale2 + num_scale2;
-                int total_w2 = digits2 * digit_w2 - num_scale2;
-                while (total_w2 > CELL_SIZE - 14 && num_scale2 > 1) {
-                    num_scale2--;
-                    digit_w2 = 3 * num_scale2 + num_scale2;
-                    total_w2 = digits2 * digit_w2 - num_scale2;
-                }
-                draw_number(cur2_x + CELL_SIZE / 2,
-                            cur2_y + (CELL_SIZE - 5 * num_scale2) / 2,
-                            v2, tc2.fg, num_scale2);
+                tile_color_t tc2 = tile_color(v2);
+                fill_rect(cur2_x + 1, cur2_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc2.bg);
+                draw_tile_number(cur2_x + CELL_SIZE / 2,
+                            cur2_y + (CELL_SIZE - 5 * FONT_SCALE) / 2,
+                            v2, tc2.fg, FONT_SCALE);
             }
         }
     }
@@ -515,20 +499,9 @@ static void render(void)
             fill_rect(tx + 1, ty + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc.bg);
 
             if (s_grid[r][c] != 0) {
-                int num_scale = FONT_SCALE;
-                uint32_t v = s_grid[r][c];
-                int digits = 0; uint32_t vv = v;
-                do { digits++; vv /= 10; } while (vv > 0);
-                int digit_w = 3 * num_scale + num_scale;
-                int total_w = digits * digit_w - num_scale;
-                while (total_w > CELL_SIZE - 14 && num_scale > 1) {
-                    num_scale--;
-                    digit_w = 3 * num_scale + num_scale;
-                    total_w = digits * digit_w - num_scale;
-                }
-                draw_number(tx + CELL_SIZE / 2,
-                            ty + (CELL_SIZE - 5 * num_scale) / 2,
-                            v, tc.fg, num_scale);
+                draw_tile_number(tx + CELL_SIZE / 2,
+                            ty + (CELL_SIZE - 5 * FONT_SCALE) / 2,
+                            s_grid[r][c], tc.fg, FONT_SCALE);
             }
         }
     }
