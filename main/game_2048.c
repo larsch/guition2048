@@ -358,9 +358,15 @@ static void render_anim(dir_t dir, int step, int total)
 
     for (int r = 0; r < GRID_SIZE; r++) {
         for (int c = 0; c < GRID_SIZE; c++) {
-            if (s_grid[r][c] == 0) continue;
-
             int src = s_anim_src[r][c];
+
+            /* empty cells stay at their static position with empty-tile color */
+            if (s_grid[r][c] == 0) {
+                tile_color_t etc = tile_color(0);
+                fill_rect(c * CELL_SIZE + 1, r * CELL_SIZE + 1,
+                          CELL_SIZE - 2, CELL_SIZE - 2, etc.bg);
+                continue;
+            }
             int from_x = horiz ? src * CELL_SIZE : c * CELL_SIZE;
             int from_y = horiz ? r * CELL_SIZE : src * CELL_SIZE;
             int to_x   = c * CELL_SIZE;
