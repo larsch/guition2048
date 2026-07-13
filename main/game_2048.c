@@ -356,14 +356,13 @@ static void render_anim(dir_t dir, int step, int total)
 
     bool horiz = (dir == DIR_LEFT || dir == DIR_RIGHT);
 
-    /* draw empty cells first (static), then animated tiles on top */
-    for (int r = 0; r < GRID_SIZE; r++) {
-        for (int c = 0; c < GRID_SIZE; c++) {
-            if (s_grid[r][c] != 0) continue;
-            tile_color_t etc = tile_color(0);
-            fill_rect(c * CELL_SIZE + 1, r * CELL_SIZE + 1,
-                      CELL_SIZE - 2, CELL_SIZE - 2, etc.bg);
-        }
+    /* all cells start as empty-tile color — animated tiles drawn on top */
+    {
+        tile_color_t etc = tile_color(0);
+        for (int r = 0; r < GRID_SIZE; r++)
+            for (int c = 0; c < GRID_SIZE; c++)
+                fill_rect(c * CELL_SIZE + 1, r * CELL_SIZE + 1,
+                          CELL_SIZE - 2, CELL_SIZE - 2, etc.bg);
     }
 
     for (int r = 0; r < GRID_SIZE; r++) {
