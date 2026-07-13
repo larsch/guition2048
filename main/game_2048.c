@@ -343,18 +343,9 @@ static void render(void)
         // draw "GAME OVER" as score text replacement
     }
 
-    /* push each tile individually — avoids full-frame DMA flash */
-    {
-        esp_lcd_panel_handle_t panel = display_get_panel();
-        for (int r = 0; r < GRID_SIZE; r++) {
-            for (int c = 0; c < GRID_SIZE; c++) {
-                int tx = c * CELL_SIZE;
-                int ty = r * CELL_SIZE;
-                esp_lcd_panel_draw_bitmap(panel, tx, ty,
-                    tx + CELL_SIZE, ty + CELL_SIZE, s_fb);
-            }
-        }
-    }
+    /* push full frame */
+    esp_lcd_panel_draw_bitmap(display_get_panel(), 0, 0,
+                              LCD_H_RES, LCD_V_RES, s_fb);
 }
 
 /* ================================================================
