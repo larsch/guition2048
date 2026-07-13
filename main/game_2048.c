@@ -367,12 +367,16 @@ static void render_anim(dir_t dir, int step, int total)
             int to_y   = r * CELL_SIZE;
             int cur_x  = from_x + (to_x - from_x) * step / total;
             int cur_y  = from_y + (to_y - from_y) * step / total;
+            int src2   = s_anim_src2[r][c];
 
-            tile_color_t tc = tile_color(s_grid[r][c]);
+            /* during animation, show pre-merge value so both tiles look identical */
+            uint32_t v = (src2 >= 0 && step < total)
+                ? s_grid_prev[horiz ? r : src][horiz ? src : c]
+                : s_grid[r][c];
+            tile_color_t tc = tile_color(v);
             fill_rect(cur_x + 1, cur_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc.bg);
 
             int num_scale = FONT_SCALE;
-            uint32_t v = s_grid[r][c];
             int digits = 0; uint32_t vv = v;
             do { digits++; vv /= 10; } while (vv > 0);
             int digit_w = 3 * num_scale + num_scale;
@@ -387,7 +391,6 @@ static void render_anim(dir_t dir, int step, int total)
                         v, tc.fg, num_scale);
 
             /* second source tile sliding in for a merge */
-            int src2 = s_anim_src2[r][c];
             if (src2 >= 0) {
                 int from2_x = horiz ? src2 * CELL_SIZE : c * CELL_SIZE;
                 int from2_y = horiz ? r * CELL_SIZE : src2 * CELL_SIZE;
