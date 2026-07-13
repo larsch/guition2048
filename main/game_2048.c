@@ -546,9 +546,19 @@ static void render(void)
                     s_score, rgb565(119, 110, 101), scale);
     }
 
-    /* game-over overlay with score */
+    /* game-over: blend semi-transparent overlay over the game field */
     if (s_game_over) {
-        fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(238, 228, 218));
+        /* darken the entire frame by blending with a dark color */
+        uint16_t overlay = rgb565(0, 0, 0);
+        for (int i = 0; i < LCD_H_RES * LCD_V_RES; i++) {
+            uint16_t px = s_fb[s_fb_idx][i];
+            /* 50% blend: average each color channel */
+            uint16_t r = (((px >> 11) & 0x1F) + ((overlay >> 11) & 0x1F)) >> 1;
+            uint16_t g = (((px >> 5) & 0x3F) + ((overlay >> 5) & 0x3F)) >> 1;
+            uint16_t b = ((px & 0x1F) + (overlay & 0x1F)) >> 1;
+            s_fb[s_fb_idx][i] = (r << 11) | (g << 5) | b;
+        }
+
         /* score large and centered */
         {
             uint32_t v = s_score;
@@ -558,10 +568,10 @@ static void render(void)
             int digit_w = 3 * scale + scale;
             int total_w = digits * digit_w - scale;
             draw_number(LCD_H_RES / 2, LCD_V_RES / 2 - 30,
-                        s_score, rgb565(119, 110, 101), scale);
+                        s_score, rgb565(255, 255, 255), scale);
         }
         draw_text(LCD_H_RES / 2, LCD_V_RES / 2 + 50,
-                  "GAME OVER", rgb565(119, 110, 101), 3);
+                  "GAME OVER", rgb565(255, 255, 255), 3);
     }
 
     /* push full frame */
