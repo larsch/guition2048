@@ -95,6 +95,11 @@ static bool      s_won;
 static uint16_t *s_fb[2];
 static int       s_fb_idx;
 
+/* animation state */
+static uint32_t s_grid_prev[GRID_SIZE][GRID_SIZE];
+static int      s_anim_src[GRID_SIZE][GRID_SIZE];  /* source row or col per tile */
+#define ANIM_FRAMES 8
+
 /* ================================================================
  * Logic
  * ================================================================ */
@@ -195,6 +200,53 @@ static bool move_dir(dir_t dir)
     return moved;
 }
 
+/* Compute where each tile in s_grid came from in s_grid_prev */
+static void compute_anims(dir_t dir)
+{
+    /* reset */
+    for (int r = 0; r < GRID_SIZE; r++)
+        for (int c = 0; c < GRID_SIZE; c++)
+            s_anim_src[r][c] = -1;
+
+    for (int line = 0; line < GRID_SIZE; line++) {
+        /* collect non-zero tiles with their positions along the axis */
+        int vals[GRID_SIZE], idxs[GRID_SIZE], cnt = 0;
+        for (int i = 0; i < GRID_SIZE; i++) {
+            int r = (dir == DIR_UP || dir == DIR_DOWN) ? i : line;
+            int c = (dir == DIR_UP || dir == DIR_DOWN) ? line : i;
+            if (dir == DIR_RIGHT || dir == DIR_DOWN) {
+                r = (dir == DIR_DOWN) ? (GRID_SIZE - 1 - i) : line;
+                c = (dir == DIR_UP || dir == DIR_DOWN) ? line : (GRID_SIZE - 1 - i);
+            }
+            if (s_grid_prev[r][c]) {
+                vals[cnt] = s_grid_prev[r][c];
+                idxs[cnt] = (dir == DIR_UP || dir == DIR_DOWN) ? r : c;
+                cnt++;
+            }
+        }
+
+        /* simulate merge to get result positions */
+        int res_idx[GRID_SIZE];
+        int rcnt = 0;
+        for (int i = 0; i < cnt; i++) {
+            if (i + 1 < cnt && vals[i] == vals[i+1]) {
+                res_idx[rcnt++] = idxs[i];  /* first source index */
+                i++;
+            } else {
+                res_idx[rcnt++] = idxs[i];
+            }
+        }
+
+        /* map results back to grid positions */
+        for (int dst = 0; dst < rcnt; dst++) {
+            int d = (dir == DIR_RIGHT || dir == DIR_DOWN) ? (GRID_SIZE - 1 - dst) : dst;
+            int r = (dir == DIR_UP || dir == DIR_DOWN) ? d : line;
+            int c = (dir == DIR_UP || dir == DIR_DOWN) ? line : d;
+            s_anim_src[r][c] = res_idx[dst];
+        }
+    }
+}
+
 static bool can_move(void)
 {
     for (int r = 0; r < GRID_SIZE; r++) {
@@ -290,6 +342,62 @@ static void draw_number(int cx, int cy, uint32_t val, uint16_t color, int scale)
 
     for (int i = 0; i < len; i++)
         draw_char(start_x + i * digit_w, cy, buf[i], color, scale);
+}
+
+static void render_anim(dir_t dir, int step, int total)
+{
+    /* grid background */
+    fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(187, 173, 160));
+
+    bool horiz = (dir == DIR_LEFT || dir == DIR_RIGHT);
+
+    for (int r = 0; r < GRID_SIZE; r++) {
+        for (int c = 0; c < GRID_SIZE; c++) {
+            if (s_grid[r][c] == 0) continue;
+
+            int src = s_anim_src[r][c];
+            int from_x = horiz ? src * CELL_SIZE : c * CELL_SIZE;
+            int from_y = horiz ? r * CELL_SIZE : src * CELL_SIZE;
+            int to_x   = c * CELL_SIZE;
+            int to_y   = r * CELL_SIZE;
+            int cur_x  = from_x + (to_x - from_x) * step / total;
+            int cur_y  = from_y + (to_y - from_y) * step / total;
+
+            tile_color_t tc = tile_color(s_grid[r][c]);
+            fill_rect(cur_x + 1, cur_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, tc.bg);
+
+            int num_scale = FONT_SCALE;
+            uint32_t v = s_grid[r][c];
+            int digits = 0; uint32_t vv = v;
+            do { digits++; vv /= 10; } while (vv > 0);
+            int digit_w = 3 * num_scale + num_scale;
+            int total_w = digits * digit_w - num_scale;
+            while (total_w > CELL_SIZE - 14 && num_scale > 1) {
+                num_scale--;
+                digit_w = 3 * num_scale + num_scale;
+                total_w = digits * digit_w - num_scale;
+            }
+            draw_number(cur_x + CELL_SIZE / 2,
+                        cur_y + (CELL_SIZE - 5 * num_scale) / 2,
+                        v, tc.fg, num_scale);
+        }
+    }
+
+    /* score */
+    {
+        uint32_t v = s_score;
+        int digits = 0; uint32_t vv = v;
+        do { digits++; vv /= 10; } while (vv > 0);
+        int scale = 2;
+        int digit_w = 3 * scale + scale;
+        int total_w = digits * digit_w - scale;
+        draw_number(4 + total_w / 2, SCORE_Y + 10,
+                    s_score, rgb565(119, 110, 101), scale);
+    }
+
+    esp_lcd_panel_draw_bitmap(display_get_panel(), 0, 0,
+                              LCD_H_RES, LCD_V_RES, s_fb[s_fb_idx]);
+    s_fb_idx ^= 1;
 }
 
 static void render(void)
@@ -416,12 +524,21 @@ static void game_task(void *arg)
     while (1) {
         dir_t dir;
         if (detect_swipe(&dir) && !s_game_over) {
+            memcpy(s_grid_prev, s_grid, sizeof(s_grid));
             if (move_dir(dir)) {
-                spawn_tile();
+                compute_anims(dir);
                 if (!can_move()) s_game_over = true;
+                if (s_score > s_best) s_best = s_score;
+
+                /* animate slide */
+                for (int step = 0; step <= ANIM_FRAMES; step++) {
+                    render_anim(dir, step, ANIM_FRAMES);
+                    vTaskDelay(pdMS_TO_TICKS(16));
+                }
+
+                spawn_tile();
                 dirty = true;
             }
-            if (s_score > s_best) s_best = s_score;
         }
 
         /* tap to restart when game over */
