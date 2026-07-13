@@ -15,6 +15,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 
 static const char *TAG = "2048";
 
@@ -99,7 +100,65 @@ static int       s_fb_idx;
 static uint32_t s_grid_prev[GRID_SIZE][GRID_SIZE];
 static int      s_anim_src[GRID_SIZE][GRID_SIZE];   /* primary source row/col */
 static int      s_anim_src2[GRID_SIZE][GRID_SIZE];  /* second source (merge) or -1 */
+static int64_t  s_game_over_time;                    /* timestamp when game ended */
 #define ANIM_FRAMES 8
+
+/* ================================================================
+ * 3×5 letter font for game-over text
+ * ================================================================ */
+
+static const uint8_t s_font_letter[7][5] = {
+    {0b011, 0b100, 0b101, 0b101, 0b011}, // G
+    {0b010, 0b101, 0b111, 0b101, 0b101}, // A
+    {0b101, 0b111, 0b101, 0b101, 0b101}, // M
+    {0b111, 0b100, 0b111, 0b100, 0b111}, // E
+    {0b010, 0b101, 0b101, 0b101, 0b010}, // O
+    {0b101, 0b101, 0b101, 0b101, 0b010}, // V
+    {0b110, 0b101, 0b110, 0b101, 0b101}, // R
+};
+
+static int letter_idx(char ch)
+{
+    switch (ch) {
+        case 'G': case 'g': return 0;
+        case 'A': case 'a': return 1;
+        case 'M': case 'm': return 2;
+        case 'E': case 'e': return 3;
+        case 'O': case 'o': return 4;
+        case 'V': case 'v': return 5;
+        case 'R': case 'r': return 6;
+        default: return -1;
+    }
+}
+
+static void draw_letter(int cx, int cy, char ch, uint16_t color, int scale)
+{
+    int idx = letter_idx(ch);
+    if (idx < 0) return;
+    const uint8_t *glyph = s_font_letter[idx];
+    for (int row = 0; row < 5; row++) {
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < 3; col++) {
+            if (bits & (1 << (2 - col))) {
+                int x = cx + col * scale;
+                int y = cy + row * scale;
+                for (int sy = 0; sy < scale; sy++)
+                    for (int sx = 0; sx < scale; sx++)
+                        s_fb[s_fb_idx][(y + sy) * LCD_H_RES + x + sx] = color;
+            }
+        }
+    }
+}
+
+static void draw_text(int cx, int cy, const char *text, uint16_t color, int scale)
+{
+    int len = strlen(text);
+    int digit_w = 3 * scale + scale;
+    int total_w = len * digit_w - scale;
+    int x = cx - total_w / 2;
+    for (int i = 0; i < len; i++)
+        draw_letter(x + i * digit_w, cy, text[i], color, scale);
+}
 
 /* ================================================================
  * Logic
@@ -487,10 +546,22 @@ static void render(void)
                     s_score, rgb565(119, 110, 101), scale);
     }
 
-    /* game-over dim + tap prompt */
+    /* game-over overlay with score */
     if (s_game_over) {
         fill_rect(0, 0, LCD_H_RES, LCD_V_RES, rgb565(238, 228, 218));
-        // draw "GAME OVER" as score text replacement
+        /* score large and centered */
+        {
+            uint32_t v = s_score;
+            int digits = 0; uint32_t vv = v;
+            do { digits++; vv /= 10; } while (vv > 0);
+            int scale = 5;
+            int digit_w = 3 * scale + scale;
+            int total_w = digits * digit_w - scale;
+            draw_number(LCD_H_RES / 2, LCD_V_RES / 2 - 30,
+                        s_score, rgb565(119, 110, 101), scale);
+        }
+        draw_text(LCD_H_RES / 2, LCD_V_RES / 2 + 50,
+                  "GAME OVER", rgb565(119, 110, 101), 3);
     }
 
     /* push full frame */
@@ -567,9 +638,8 @@ static void game_task(void *arg)
         if (detect_swipe(&dir) && !s_game_over) {
             memcpy(s_grid_prev, s_grid, sizeof(s_grid));
             if (move_dir(dir)) {
-                compute_anims(dir);
-                if (!can_move()) s_game_over = true;
                 if (s_score > s_best) s_best = s_score;
+                compute_anims(dir);
 
                 /* animate slide */
                 for (int step = 0; step <= ANIM_FRAMES; step++) {
@@ -578,14 +648,19 @@ static void game_task(void *arg)
                 }
 
                 spawn_tile();
+                if (!can_move()) {
+                    s_game_over = true;
+                    s_game_over_time = esp_timer_get_time();
+                }
                 dirty = true;
             }
         }
 
-        /* tap to restart when game over */
+        /* tap to restart when game over (after 2-second cooldown) */
         if (s_game_over) {
             const touch_state_t *ts = touch_get_state();
-            if (ts->points > 0) {
+            if (ts->points > 0 &&
+                (esp_timer_get_time() - s_game_over_time) > 2000000) {
                 reset_game();
                 dirty = true;
                 vTaskDelay(pdMS_TO_TICKS(300));
