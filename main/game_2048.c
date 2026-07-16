@@ -20,6 +20,10 @@
 
 static const char *TAG = "2048";
 
+#if LCD_BUF_MODE != 6
+#error "This game requires LCD_BUF_MODE 6 (BOUNCE_ONLY). Check sdkconfig."
+#endif
+
 #define GRID_SIZE  4
 #define CELL_SIZE  120
 #define SCORE_Y    2
