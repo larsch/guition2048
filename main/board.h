@@ -75,7 +75,7 @@
 #elif CONFIG_LCD_BUF_MODE_BOUNCE_ONLY
  #define LCD_BUF_MODE  6
 #else
- #define LCD_BUF_MODE  2
+ #define LCD_BUF_MODE  6
 #endif
 
 #define LCD_BUF_IS_ISR_DRIVEN  (LCD_BUF_MODE == 6)
