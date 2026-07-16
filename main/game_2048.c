@@ -506,8 +506,12 @@ static bool detect_swipe(dir_t *out_dir)
     int adx = dx > 0 ? dx : -dx, ady = dy > 0 ? dy : -dy;
     if (adx < SWIPE_THRESHOLD && ady < SWIPE_THRESHOLD) return false;
 
-    *out_dir = (adx > ady) ? ((dx > 0) ? DIR_RIGHT : DIR_LEFT)
-                           : ((dy > 0) ? DIR_DOWN  : DIR_UP);
+    if (adx > 2 * ady)
+        *out_dir = (dx > 0) ? DIR_RIGHT : DIR_LEFT;
+    else if (ady > 2 * adx)
+        *out_dir = (dy > 0) ? DIR_DOWN  : DIR_UP;
+    else
+        return false;  /* too diagonal */
     return true;
 }
 
