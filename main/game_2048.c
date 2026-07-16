@@ -720,9 +720,8 @@ static void game_task(void *arg)
 
     /* initial state */
     memset(gs(), 0, sizeof(game_state_t));
-    gs()->grid[3][1] = 8;
-    gs()->grid[3][2] = 8;
-    gs()->grid[3][3] = 16;
+    spawn_tile();
+    spawn_tile();
     render_score();
     commit_state();
 
