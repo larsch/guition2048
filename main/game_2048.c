@@ -541,8 +541,17 @@ static inline IRAM_ATTR void isr_blit_tile_row(uint16_t *row, int tx,
     if (dx + copy_w > LCD_H_RES) copy_w = LCD_H_RES - dx;
     if (copy_w <= 0) return;
 
-    uint16_t *src = tile_src + tile_row * TILE_PX + src_x;
-    memcpy(row + dx, src, copy_w * 2);
+    uint32_t *dst32 = (uint32_t *)(row + dx);
+    const uint32_t *src32 = (const uint32_t *)(tile_src + tile_row * TILE_PX
+                                                + src_x);
+    int words = copy_w / 2;
+    for (int i = 0; i < words; i++)
+        dst32[i] = src32[i];
+
+    if (copy_w & 1) {
+        int tail = words * 2;
+        row[dx + tail] = tile_src[tile_row * TILE_PX + src_x + tail];
+    }
 }
 
 /* ================================================================
